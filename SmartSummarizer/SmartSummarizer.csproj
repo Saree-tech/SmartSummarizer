@@ -94,6 +94,8 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="appsettings.example.json" />
+    <None Include="appsettings.json" />
     <None Include="ClassDiagram1.cd" />
     <None Include="Dockerfile" />
     <Compile Include="Form1.cs">

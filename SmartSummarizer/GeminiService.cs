@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,25 +13,66 @@ namespace SmartSummarizer
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
         private readonly string _modelName;
+        private readonly int _timeoutSeconds;
+        private readonly int _maxOutputTokens;
+        private readonly double _temperature;
 
         public GeminiService()
         {
-            // ============================================================
-            // GEMINI API KEY CONFIGURATION
-            // ============================================================
-            // Your API key and correct model name from Google AI Studio
-            // ============================================================
+            // Load configuration from multiple sources
+            var config = LoadConfiguration();
 
-            string apiKey = "AIzaSyAJyqmVkv663p64eHg70QjP_KA9i3LFxsc"; // YOUR API KEY
-            string modelName = "gemini-2.5-flash"; // Correct model from listing
+            _apiKey = config.ApiKey;
+            _modelName = config.ModelName;
+            _timeoutSeconds = config.TimeoutSeconds;
+            _maxOutputTokens = config.MaxOutputTokens;
+            _temperature = config.Temperature;
 
-            // ============================================================
-
-            _apiKey = apiKey;
-            _modelName = modelName;
             _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromSeconds(60); // Increased timeout for longer responses
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "SmartSummarizer/1.0");
+            _httpClient.Timeout = TimeSpan.FromSeconds(_timeoutSeconds);
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", config.UserAgent);
+        }
+
+        private Configuration LoadConfiguration()
+        {
+            var config = new Configuration();
+            string configPath = "appsettings.json";
+
+            // Try to load from appsettings.json
+            if (File.Exists(configPath))
+            {
+                try
+                {
+                    string jsonContent = File.ReadAllText(configPath);
+                    var jsonConfig = JObject.Parse(jsonContent);
+
+                    config.ApiKey = jsonConfig["Gemini"]?["ApiKey"]?.ToString();
+                    config.ModelName = jsonConfig["Gemini"]?["ModelName"]?.ToString() ?? "gemini-2.5-flash";
+                    config.TimeoutSeconds = int.Parse(jsonConfig["Gemini"]?["TimeoutSeconds"]?.ToString() ?? "60");
+                    config.MaxOutputTokens = int.Parse(jsonConfig["Gemini"]?["MaxOutputTokens"]?.ToString() ?? "500");
+                    config.Temperature = double.Parse(jsonConfig["Gemini"]?["Temperature"]?.ToString() ?? "0.7");
+                    config.UserAgent = jsonConfig["Application"]?["UserAgent"]?.ToString() ?? "SmartSummarizer/1.0";
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error loading config: {ex.Message}");
+                }
+            }
+
+            // Environment variable takes precedence (for CI/CD and production)
+            string envApiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+            if (!string.IsNullOrEmpty(envApiKey))
+            {
+                config.ApiKey = envApiKey;
+            }
+
+            string envModelName = Environment.GetEnvironmentVariable("GEMINI_MODEL_NAME");
+            if (!string.IsNullOrEmpty(envModelName))
+            {
+                config.ModelName = envModelName;
+            }
+
+            return config;
         }
 
         public bool IsApiKeyConfigured()
@@ -46,7 +88,7 @@ namespace SmartSummarizer
             {
                 if (!IsApiKeyConfigured())
                 {
-                    return "ERROR: API key not configured";
+                    return GetApiKeyErrorMessage();
                 }
 
                 string url = $"https://generativelanguage.googleapis.com/v1/models?key={_apiKey}";
@@ -95,9 +137,7 @@ namespace SmartSummarizer
             {
                 if (!IsApiKeyConfigured())
                 {
-                    return "ERROR: API key not configured or invalid format.\n\n" +
-                           "Key should start with 'AIza' and be about 39 characters long.\n\n" +
-                           "Get your free key at: https://makersuite.google.com/app/apikey";
+                    return GetApiKeyErrorMessage();
                 }
 
                 var requestBody = new
@@ -160,7 +200,7 @@ namespace SmartSummarizer
             {
                 if (!IsApiKeyConfigured())
                 {
-                    return "Error: API key not configured. Please add your Gemini API key in GeminiService.cs";
+                    return GetApiKeyErrorMessage();
                 }
 
                 if (string.IsNullOrWhiteSpace(textToSummarize))
@@ -173,7 +213,6 @@ namespace SmartSummarizer
                     textToSummarize = textToSummarize.Substring(0, 1000000) + "...";
                 }
 
-                // Improved prompt for better summaries
                 var requestBody = new
                 {
                     contents = new[]
@@ -201,8 +240,8 @@ Summary:"
                     },
                     generationConfig = new
                     {
-                        temperature = 0.7,  // Slightly higher for more creative summaries
-                        maxOutputTokens = 500,  // Increased for longer summaries
+                        temperature = _temperature,
+                        maxOutputTokens = _maxOutputTokens,
                         topP = 0.95,
                         topK = 40
                     }
@@ -242,6 +281,33 @@ Summary:"
             {
                 return $"Error: {ex.Message}";
             }
+        }
+
+        private string GetApiKeyErrorMessage()
+        {
+            return "ERROR: API key not configured.\n\n" +
+                   "To use SmartSummarizer, you need a Google Gemini API key.\n\n" +
+                   "Setup Instructions:\n" +
+                   "1. Get your free API key at: https://makersuite.google.com/app/apikey\n" +
+                   "2. Create a file named 'appsettings.json' in the application folder\n" +
+                   "3. Add the following configuration:\n\n" +
+                   "{\n" +
+                   "  \"Gemini\": {\n" +
+                   "    \"ApiKey\": \"your-api-key-here\"\n" +
+                   "  }\n" +
+                   "}\n\n" +
+                   "Or set the environment variable: GEMINI_API_KEY\n\n" +
+                   "See README.md for detailed setup instructions.";
+        }
+
+        private class Configuration
+        {
+            public string ApiKey { get; set; }
+            public string ModelName { get; set; } = "gemini-2.5-flash";
+            public int TimeoutSeconds { get; set; } = 60;
+            public int MaxOutputTokens { get; set; } = 500;
+            public double Temperature { get; set; } = 0.7;
+            public string UserAgent { get; set; } = "SmartSummarizer/1.0";
         }
     }
 }
